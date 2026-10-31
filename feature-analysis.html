@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Analysis</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom right, #007BFF, #339DFF, #66B6FF, #99CEFF, #CCE6FF);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+            margin: 0;
+        }
+
+        header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: white;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        .chart-container {
+            width: 90%;
+            margin-top: 20px;
+        }
+
+        h3 {
+            margin-top: 20px;
+            color: #007BFF;
+        }
+
+        canvas {
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <header>Feature Analysis</header>
+
+    <div class="button-bar">
+        <button onclick="openExtractFeatures()">Extract New Features</button>
+        <button onclick="openFeatureSelection()">Feature Selection</button>
+        <button onclick="openNormalizeData()">Normalize Data</button>
+        <button onclick="openOutliersCheck()">Outliers Check</button>
+    </div>
+
+    <!-- Top Bar for Dataset Dropdown -->
+    <div class="top-bar">
+        <label for="datasetSelect">Select Dataset:</label>
+        <select id="datasetSelect" onchange="filterDatasets()">
+            <option value="all">All Datasets</option>
+        </select>
+    </div>
+
+    <!-- Chart Containers -->
+    <div id="chartContainer" class="chart-container"></div>
+
+    <!-- Action Buttons -->
+    <div style="text-align: center;">
+        <button onclick="performFeatureAnalysis()">Analyze Feature-Target Relationships</button>
+    </div>
+
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+        const { ipcRenderer } = require('electron');
+        let datasets = [];
+        let currentDatasets = [];
+        let targetVariable = null;
+
+        ipcRenderer.on('load-datasets-for-feature-analysis', (event, loadedDatasets) => {
+            datasets = loadedDatasets;
+            populateDropdown();
+            filterDatasets();
+        });
+
+        function populateDropdown() {
+            const dropdown = document.getElementById('datasetSelect');
+            dropdown.innerHTML = '<option value="all">All Datasets</option>';
+            datasets.forEach((dataset, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = dataset.name;
+                dropdown.appendChild(option);
+            });
+        }
+
+        function filterDatasets() {
+            const selectedValue = document.getElementById('datasetSelect').value;
+            currentDatasets = selectedValue === 'all' ? datasets : [datasets[selectedValue]];
+        }
+
+        function detectTargetVariable(dataset) {
+            const targetKeywords = ['production', 'system production', 'SystemProduction', 'ac_power', 'dc_power', 'generation', 'performance', 'AC_POWER', 'DC_POWER'];
+            const columns = Object.keys(dataset.data[0]);
+            for (const col of columns) {
+                if (targetKeywords.some(keyword => col.toLowerCase().includes(keyword))) {
+                    return col;
+                }
+            }
+            return null;
+        }
+
+        function performFeatureAnalysis() {
+            const chartContainer = document.getElementById('chartContainer');
+            chartContainer.innerHTML = ''; // Clear previous content
+
+            currentDatasets.forEach((dataset) => {
+                const data = dataset.data;
+                targetVariable = detectTargetVariable(dataset);
+
+                if (!targetVariable) {
+                    chartContainer.innerHTML += `<h3 style="color: red;">No target variable detected for ${dataset.name}</h3>`;
+                    return;
+                }
+
+                const numericColumns = Object.keys(data[0]).filter(key => 
+                    data.every(row => !isNaN(parseFloat(row[key])) && isFinite(row[key])) && key !== targetVariable
+                );
+
+                chartContainer.innerHTML += `<h3>Dataset: ${dataset.name} | Target: ${targetVariable}</h3>`;
+
+                createScatterPlots(data, numericColumns, targetVariable, chartContainer);
+                createCorrelationHeatmap(data, [...numericColumns, targetVariable], chartContainer);
+                createPairwiseScatterPlots(data, numericColumns, chartContainer);
+            });
+        }
+
+        function createScatterPlots(data, features, target, container) {
+            features.forEach(feature => {
+                const xData = data.map(row => parseFloat(row[feature]));
+                const yData = data.map(row => parseFloat(row[target]));
+
+                const scatterDiv = document.createElement('div');
+                container.appendChild(scatterDiv);
+
+                const trace = {
+                    x: xData,
+                    y: yData,
+                    mode: 'markers',
+                    marker: { size: 6, color: '#007BFF' },
+                    type: 'scatter'
+                };
+
+                const layout = {
+                    title: `${feature} vs ${target}`,
+                    xaxis: { title: feature },
+                    yaxis: { title: target },
+                    margin: { l: 50, r: 50, t: 50, b: 50 },
+                };
+
+                Plotly.newPlot(scatterDiv, [trace], layout);
+            });
+        }
+
+        function createCorrelationHeatmap(data, columns, container) {
+            const matrix = computeCorrelationMatrix(data, columns);
+
+            const trace = {
+                z: matrix,
+                x: columns,
+                y: columns,
+                type: 'heatmap',
+                colorscale: 'RdBu',
+                zmin: -1,
+                zmax: 1
+            };
+
+            const layout = {
+                title: 'Correlation Heatmap',
+                xaxis: { side: 'top' },
+                yaxis: { autorange: 'reversed' },
+                margin: { l: 50, r: 50, t: 50, b: 50 }
+            };
+
+            const heatmapDiv = document.createElement('div');
+            container.appendChild(heatmapDiv);
+            Plotly.newPlot(heatmapDiv, [trace], layout);
+        }
+
+        function computeCorrelationMatrix(data, columns) {
+            const matrix = [];
+            columns.forEach(col1 => {
+                const row = [];
+                columns.forEach(col2 => {
+                    row.push(calculateCorrelation(data, col1, col2));
+                });
+                matrix.push(row);
+            });
+            return matrix;
+        }
+
+        function calculateCorrelation(data, colX, colY) {
+            const x = data.map(row => parseFloat(row[colX]));
+            const y = data.map(row => parseFloat(row[colY]));
+
+            const meanX = x.reduce((a, b) => a + b, 0) / x.length;
+            const meanY = y.reduce((a, b) => a + b, 0) / y.length;
+
+            const numerator = x.map((val, i) => (val - meanX) * (y[i] - meanY)).reduce((a, b) => a + b, 0);
+            const denominator = Math.sqrt(
+                x.map(val => Math.pow(val - meanX, 2)).reduce((a, b) => a + b, 0) *
+                y.map(val => Math.pow(val - meanY, 2)).reduce((a, b) => a + b, 0)
+            );
+
+            return denominator ? numerator / denominator : 0;
+        }
+
+        function createPairwiseScatterPlots(data, features, container) {
+            for (let i = 0; i < features.length; i++) {
+                for (let j = i + 1; j < features.length; j++) {
+                    const xFeature = features[i];
+                    const yFeature = features[j];
+
+                    const scatterDiv = document.createElement('div');
+                    container.appendChild(scatterDiv);
+
+                    const trace = {
+                        x: data.map(row => parseFloat(row[xFeature])),
+                        y: data.map(row => parseFloat(row[yFeature])),
+                        mode: 'markers',
+                        marker: { size: 5, color: '#66B6FF' },
+                        type: 'scatter'
+                    };
+
+                    const layout = {
+                        title: `${xFeature} vs ${yFeature}`,
+                        xaxis: { title: xFeature },
+                        yaxis: { title: yFeature },
+                        margin: { l: 50, r: 50, t: 50, b: 50 }
+                    };
+
+                    Plotly.newPlot(scatterDiv, [trace], layout);
+                }
+            }
+        }
+
+        function openExtractFeatures() {
+            ipcRenderer.send('open-extract-features-window', currentDatasets);
+        }
+
+        function openFeatureSelection() {
+            ipcRenderer.send('open-feature-selection-window', currentDatasets);
+        }
+
+        function openNormalizeData() {
+            ipcRenderer.send('open-normalize-data-window', currentDatasets);
+        }
+
+        function openOutliersCheck() {
+            ipcRenderer.send('open-outliers-window', currentDatasets);
+        }
+
+        ipcRenderer.on('datasets-updated', (event, updatedDatasets) => {
+            datasets = updatedDatasets; // Update the local datasets list
+            populateDropdown(); // Reload the dropdown list with the updated datasets
+        });
+        
+    </script>
+</body>
+</html>

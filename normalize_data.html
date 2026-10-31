@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Normalize Data</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom right, #007BFF, #339DFF, #66B6FF, #99CEFF, #CCE6FF);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .controls {
+            margin: 20px;
+            text-align: center;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: white;
+            font-size: 1rem;
+            color: #333;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #007BFF;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+            width: 90%;
+            border: 1px solid #ddd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background-color: white;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background-color: #FFD700;
+            color: #333;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        h3 {
+            margin-bottom: 10px;
+            color: #007BFF;
+        }
+    </style>
+</head>
+<body>
+    <header>Normalize Data</header>
+
+    <!-- Dropdown for Dataset Selection -->
+    <div class="top-bar">
+        <label for="datasetSelect" style="color: white;">Select Dataset:</label>
+        <select id="datasetSelect" onchange="loadSelectedDataset()">
+            <option value="all">All Datasets</option>
+        </select>
+    </div>
+
+    <!-- Method Selection -->
+    <div class="controls">
+        <label for="method">Select Normalization Method:</label>
+        <select id="method">
+            <option value="minmax">MinMaxScaler</option>
+            <option value="standard">StandardScaler</option>
+        </select>
+        <button onclick="normalizeDataset()">Normalize</button>
+    </div>
+
+    <!-- Table Display -->
+    <div id="tableContainer" class="table-container"></div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        let datasets = [];
+        let currentDataset = null;
+
+        // Load datasets and populate dropdown
+        ipcRenderer.on('load-datasets-for-normalization', (event, loadedDatasets) => {
+            datasets = loadedDatasets;
+            populateDropdown();
+            loadSelectedDataset();
+        });
+
+        // Populate dropdown
+        function populateDropdown() {
+            const dropdown = document.getElementById('datasetSelect');
+            dropdown.innerHTML = ''; // Clear existing options
+            datasets.forEach((dataset, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = dataset.name;
+                dropdown.appendChild(option);
+            });
+        }
+
+        // Load the selected dataset
+        function loadSelectedDataset() {
+            const selectedIndex = document.getElementById('datasetSelect').value;
+            currentDataset = datasets[selectedIndex];
+            displayDataset(currentDataset);
+        }
+
+        // Display dataset in table format
+        function displayDataset(dataset) {
+            const container = document.getElementById('tableContainer');
+            container.innerHTML = '';
+
+            const tableHTML = `
+                <h3>${dataset.name}</h3>
+                <table>
+                    <thead>
+                        <tr>${Object.keys(dataset.data[0]).map(key => `<th>${key}</th>`).join('')}</tr>
+                    </thead>
+                    <tbody>
+                        ${dataset.data.slice(0, 10).map(row => `
+                            <tr>${Object.values(row).map(val => `<td>${val}</td>`).join('')}</tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            container.innerHTML = tableHTML;
+        }
+
+        // Normalize the selected dataset
+        function normalizeDataset() {
+            const method = document.getElementById('method').value;
+            if (!currentDataset) {
+                alert("Please select a dataset.");
+                return;
+            }
+        
+            // Deep copy the dataset and ensure the 'name' property exists
+            const dataset = JSON.parse(JSON.stringify(currentDataset));
+            const newDatasetName = (currentDataset.name || 'dataset') + '_normalized';
+        
+            const numericColumns = Object.keys(dataset.data[0]).filter(key =>
+                dataset.data.every(row => !isNaN(parseFloat(row[key])) && isFinite(row[key]))
+            );
+        
+            numericColumns.forEach(col => {
+                const values = dataset.data.map(row => parseFloat(row[col]));
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const mean = values.reduce((a, b) => a + b, 0) / values.length;
+                const stdDev = Math.sqrt(values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length);
+        
+                dataset.data.forEach(row => {
+                    if (method === 'minmax') {
+                        row[col] = ((parseFloat(row[col]) - min) / (max - min)).toFixed(4);
+                    } else if (method === 'standard') {
+                        row[col] = ((parseFloat(row[col]) - mean) / stdDev).toFixed(4);
+                    }
+                });
+            });
+        
+            // Add the normalized dataset with a proper name
+            const newDataset = { name: newDatasetName, data: dataset.data };
+            datasets.push(newDataset);
+        
+            ipcRenderer.send('save-modified-dataset', datasets); // Update datasets globally
+            alert(`Dataset normalized using ${method === 'minmax' ? 'MinMaxScaler' : 'StandardScaler'}.`);
+            
+            // Update dropdown and reselect the new dataset
+            populateDropdown();
+            document.getElementById('datasetSelect').value = datasets.length - 1;
+            loadSelectedDataset();
+        }
+        
+    </script>
+</body>
+</html>

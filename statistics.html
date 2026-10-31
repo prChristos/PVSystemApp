@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statistical Analysis</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom right, #007BFF, #339DFF, #66B6FF, #99CEFF, #CCE6FF);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .info-container, .table-container {
+            width: 90%;
+            background: white;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        h3 {
+            color: #007BFF;
+            margin-bottom: 10px;
+        }
+
+        .separator {
+            margin: 20px 0;
+            border-top: 2px solid #007BFF;
+            width: 100%;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background-color: #FFD700;
+            color: #333;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .scrollable {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <header>Statistical Analysis</header>
+
+    <!-- Top Bar for Dataset Dropdown -->
+    <div class="top-bar">
+        <label for="datasetSelect" style="color: white; margin-right: 10px;">Select Dataset:</label>
+        <select id="datasetSelect" onchange="filterDatasets()">
+            <option value="all">All Datasets</option>
+        </select>
+    </div>
+
+    <!-- Dataset Information -->
+    <div id="infoContainer" class="info-container"></div>
+
+    <!-- Dataset Table -->
+    <div class="table-container">
+        <h3>Dataset View</h3>
+        <div id="datasetTableContainer"></div>
+    </div>
+
+    <!-- Descriptive Statistics -->
+    <div class="table-container">
+        <h3>Descriptive Statistics</h3>
+        <div id="statsTableContainer"></div>
+        <button onclick="exportStatistics()">Export Statistics</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        const { ipcRenderer } = require('electron');
+        let datasets = [];
+        let currentDatasets = [];
+
+        ipcRenderer.on('load-dataset', (event, loadedDatasets) => {
+            datasets = loadedDatasets;
+            populateDropdown();
+            displayDatasets(datasets);
+        });
+
+        function populateDropdown() {
+            const dropdown = document.getElementById('datasetSelect');
+            dropdown.innerHTML = '<option value="all">All Datasets</option>';
+            datasets.forEach((dataset, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = dataset.name;
+                dropdown.appendChild(option);
+            });
+        }
+
+        function filterDatasets() {
+            const selected = document.getElementById('datasetSelect').value;
+            currentDatasets = selected === 'all' ? datasets : [datasets[selected]];
+            displayDatasets(currentDatasets);
+        }
+
+        function displayDatasets(dataArray) {
+            const infoContainer = document.getElementById('infoContainer');
+            const tableContainer = document.getElementById('datasetTableContainer');
+            const statsTableContainer = document.getElementById('statsTableContainer');
+            infoContainer.innerHTML = '';
+            tableContainer.innerHTML = '';
+            statsTableContainer.innerHTML = '';
+
+            dataArray.forEach((dataset, index) => {
+                // Dataset Info
+                infoContainer.innerHTML += `
+                    <h3>${dataset.name}</h3>
+                    <p><strong>Rows:</strong> ${dataset.data.length}</p>
+                    <p><strong>Columns:</strong> ${Object.keys(dataset.data[0]).length}</p>
+                    <div class="separator"></div>
+                `;
+
+                // Scrollable Dataset Table
+                let tableHTML = '<h3>Dataset Table</h3><div class="scrollable"><table><tr>';
+                Object.keys(dataset.data[0]).forEach(header => tableHTML += `<th>${header}</th>`);
+                tableHTML += '</tr>';
+
+                dataset.data.forEach(row => {
+                    tableHTML += '<tr>' + Object.values(row).map(val => `<td>${val || '-'}</td>`).join('') + '</tr>';
+                });
+
+                tableHTML += '</table></div><div class="separator"></div>';
+                tableContainer.innerHTML += tableHTML;
+
+                // Descriptive Statistics
+                const numericColumns = Object.keys(dataset.data[0]).filter(key =>
+                    dataset.data.every(row => !isNaN(parseFloat(row[key])))
+                );
+
+                let statsHTML = `<h3>Descriptive Statistics for ${dataset.name}</h3><div class="scrollable"><table><tr>
+                    <th>Variable</th><th>Mean</th><th>Std</th><th>Min</th><th>Max</th></tr>`;
+
+                numericColumns.forEach(col => {
+                    const values = dataset.data.map(row => parseFloat(row[col])).filter(val => !isNaN(val));
+                    const mean = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2);
+                    const stdDev = Math.sqrt(values.map(val => Math.pow(val - mean, 2)).reduce((a, b) => a + b, 0) / values.length).toFixed(2);
+                    const min = Math.min(...values).toFixed(2);
+                    const max = Math.max(...values).toFixed(2);
+                    statsHTML += `<tr><td>${col}</td><td>${mean}</td><td>${stdDev}</td><td>${min}</td><td>${max}</td></tr>`;
+                });
+                statsHTML += '</table></div><div class="separator"></div>';
+                statsTableContainer.innerHTML += statsHTML;
+            });
+        }
+
+        function exportStatistics() {
+            html2canvas(document.getElementById('statsTableContainer')).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'descriptive_statistics.png';
+                link.href = canvas.toDataURL();
+                link.click();
+            });
+        }
+        ipcRenderer.on('datasets-updated', (event, updatedDatasets) => {
+            datasets = updatedDatasets; // Update the local datasets list
+            populateDropdown(); // Reload the dropdown list with the updated datasets
+        });
+        
+    </script>
+</body>
+</html>

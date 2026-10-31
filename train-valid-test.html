@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Train-Validation-Test Split</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom right, #007BFF, #339DFF, #66B6FF, #99CEFF, #CCE6FF);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            color: #333;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #007BFF;
+        }
+
+        .content {
+            width: 90%;
+            background-color: white;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .content h3 {
+            color: #007BFF;
+            margin-bottom: 20px;
+        }
+
+        .table-container {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-top: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #FFD700;
+            position: sticky;
+            top: 0;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 300px;
+            text-align: center;
+        }
+
+        .modal-content input {
+            width: 80%;
+            margin: 10px 0;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+
+        .modal-content button {
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>Train-Validation-Test Split</header>
+
+    <!-- Top Bar Dropdown -->
+    <div class="top-bar">
+        <label for="datasetSelect" style="color: white;">Select Dataset:</label>
+        <select id="datasetSelect" onchange="displayDataset()">
+            <option value="all">All Datasets</option>
+        </select>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+        <h3>Split Dataset into Train, Validation, and Test Sets</h3>
+        <div id="datasetDisplay"></div>
+        <button onclick="openSplitModal()">Perform Split</button>
+    </div>
+
+    <div class="content" id="splitResults" style="display: none;">
+        <h3>Split Results</h3>
+        <div id="trainDataset"></div>
+        <div id="validDataset"></div>
+        <div id="testDataset"></div>
+    </div>
+
+    <!-- Split Modal -->
+    <div class="modal" id="splitModal">
+        <div class="modal-content">
+            <h3>Enter Split Percentages</h3>
+            <div style="display: flex; flex-direction: column; align-items: center;">
+                <label for="trainPercent" style="margin-bottom: 5px;">Train (%)</label>
+                <input type="number" id="trainPercent" value="80" min="0" max="100" style="margin-bottom: 15px; width: 90%;">
+    
+                <label for="validPercent" style="margin-bottom: 5px;">Validation (%)</label>
+                <input type="number" id="validPercent" value="5" min="0" max="100" style="margin-bottom: 15px; width: 90%;">
+    
+                <label for="testPercent" style="margin-bottom: 5px;">Test (%)</label>
+                <input type="number" id="testPercent" value="15" min="0" max="100" style="margin-bottom: 20px; width: 90%;">
+            </div>
+            <div style="display: flex; justify-content: space-around; width: 100%;">
+                <button onclick="closeSplitModal()" style="background-color: #FF5C5C; padding: 10px 20px; border-radius: 5px; color: white; border: none; cursor: pointer;">Cancel</button>
+                <button onclick="performSplit()" style="background-color: #007BFF; padding: 10px 20px; border-radius: 5px; color: white; border: none; cursor: pointer;">Confirm</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const { ipcRenderer } = require('electron');
+        let datasets = []; // Store all datasets
+        let currentDataset = null;
+
+        ipcRenderer.on('load-datasets', (event, loadedDatasets) => {
+            datasets = loadedDatasets;
+            populateDropdown();
+        });
+
+        ipcRenderer.on('receive-new-datasets', (event, newDatasets) => {
+            console.log('New datasets received in the previous page:', newDatasets);
+        
+            // Example: Populate a dropdown with the new datasets
+            const dropdown = document.getElementById('datasetSelect');
+            newDatasets.forEach(dataset => {
+                const option = document.createElement('option');
+                option.value = dataset.name; // Use the dataset name as the value
+                option.textContent = dataset.name; // Display the dataset name
+                dropdown.appendChild(option);
+            });
+        });
+
+        function populateDropdown() {
+            const dropdown = document.getElementById('datasetSelect');
+            dropdown.innerHTML = '<option value="all">All Datasets</option>';
+            datasets.forEach((dataset, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = dataset.name;
+                dropdown.appendChild(option);
+            });
+        }
+
+        function displayDataset() {
+            const selectedValue = document.getElementById('datasetSelect').value;
+            const datasetDisplay = document.getElementById('datasetDisplay');
+            datasetDisplay.innerHTML = '';
+
+            if (selectedValue === 'all') {
+                currentDataset = null;
+                return;
+            }
+
+            currentDataset = datasets[selectedValue];
+            let tableHTML = '<div class="table-container"><table>';
+            tableHTML += '<tr>' + Object.keys(currentDataset.data[0]).map(col => `<th>${col}</th>`).join('') + '</tr>';
+
+            currentDataset.data.forEach(row => {
+                tableHTML += '<tr>' + Object.values(row).map(val => `<td>${val}</td>`).join('') + '</tr>';
+            });
+
+            tableHTML += '</table></div>';
+            datasetDisplay.innerHTML = tableHTML;
+        }
+
+        function openSplitModal() {
+            const modal = document.getElementById('splitModal');
+            modal.style.display = 'flex';
+        }
+
+        function closeSplitModal() {
+            const modal = document.getElementById('splitModal');
+            modal.style.display = 'none';
+        }
+
+        function performSplit() {
+            if (!currentDataset) {
+                alert('Please select a dataset first!');
+                return;
+            }
+        
+            // Get user-defined percentages for split
+            const trainPercent = parseInt(document.getElementById('trainPercent').value) || 80;
+            const validPercent = parseInt(document.getElementById('validPercent').value) || 5;
+            const testPercent = parseInt(document.getElementById('testPercent').value) || 15;
+        
+            // Validate percentages
+            if (trainPercent + validPercent + testPercent !== 100) {
+                alert('The percentages must add up to 100!');
+                return;
+            }
+        
+            // Perform the split
+            const totalRows = currentDataset.data.length;
+            const trainRows = Math.floor((trainPercent / 100) * totalRows);
+            const validRows = Math.floor((validPercent / 100) * totalRows);
+        
+            const trainData = currentDataset.data.slice(0, trainRows);
+            const validData = currentDataset.data.slice(trainRows, trainRows + validRows);
+            const testData = currentDataset.data.slice(trainRows + validRows);
+        
+            // Create new datasets
+            const trainDataset = { name: currentDataset.name + '_train', data: trainData };
+            const validDataset = { name: currentDataset.name + '_valid', data: validData };
+            const testDataset = { name: currentDataset.name + '_test', data: testData };
+        
+            // Send datasets to the main process for saving and broadcasting
+            ipcRenderer.send('split-datasets', [trainDataset, validDataset, testDataset]);
+        
+            // Display split results
+            displaySplitResults(trainData, validData, testData);
+        
+            alert('Datasets split successfully and saved!');
+            closeSplitModal();
+        }
+        
+        function displaySplitResults(trainData, validData, testData) {
+            const splitResults = document.getElementById('splitResults');
+            splitResults.style.display = 'block';
+
+            const trainDiv = document.getElementById('trainDataset');
+            const validDiv = document.getElementById('validDataset');
+            const testDiv = document.getElementById('testDataset');
+
+            trainDiv.innerHTML = createTableHTML(trainData, 'Train Dataset');
+            validDiv.innerHTML = createTableHTML(validData, 'Validation Dataset');
+            testDiv.innerHTML = createTableHTML(testData, 'Test Dataset');
+        }
+
+        function createTableHTML(data, title) {
+            let tableHTML = `<h3>${title}</h3><div class="table-container"><table>`;
+            tableHTML += '<tr>' + Object.keys(data[0]).map(col => `<th>${col}</th>`).join('') + '</tr>';
+
+            data.forEach(row => {
+                tableHTML += '<tr>' + Object.values(row).map(val => `<td>${val}</td>`).join('') + '</tr>';
+            });
+
+            tableHTML += '</table></div>';
+            return tableHTML;
+        }
+    </script>
+</body>
+</html>

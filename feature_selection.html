@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Selection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom right, #007BFF, #339DFF, #66B6FF, #99CEFF, #CCE6FF);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .table-container {
+            width: 90%;
+            background: white;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background-color: #FFD700;
+            color: #333;
+            position: sticky;
+            top: 0;
+        }
+
+        h3 {
+            margin: 20px 0 10px;
+            color: #007BFF;
+        }
+
+        #correlationMatrix {
+            width: 90%;
+        }
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <header>Feature Selection</header>
+    <div class="top-bar">
+        <label for="datasetSelect" style="color: white;">Select Dataset:</label>
+        <select id="datasetSelect" onchange="filterDatasets()">
+            <option value="all">All Datasets</option>
+        </select>
+    </div>
+    <div>
+        <h3>Feature Suggestions</h3>
+        <div id="featureSuggestions" style="width: 90%; margin-top: 20px; font-size: 1rem;"></div>
+
+        <h3>Manual Feature Selection</h3>
+        <div style="margin: 20px 0; text-align: center;">
+            <label for="featureDropdown" style="font-size: 1rem; color: #444;">Select Features:</label>
+            <select id="featureDropdown" multiple style="
+                width: 50%; 
+                height: 150px; 
+                border: 1px solid #ddd; 
+                border-radius: 5px; 
+                padding: 5px; 
+                font-size: 1rem; 
+                background-color: #FFF0C2;">
+            </select>
+        </div>
+    </div>
+
+<button onclick="confirmFeatureSelection()" style="
+    padding: 10px 20px; 
+    background-color: #007BFF; 
+    color: white; 
+    border: none; 
+    border-radius: 5px; 
+    font-size: 1rem; 
+    cursor: pointer;">
+    Confirm Selection
+</button>
+
+<div id="selectedFeaturesDisplay" style="margin-top: 20px; font-size: 1rem; color: #007BFF;"></div>
+
+
+    <!-- Dataset Table -->
+    <div class="table-container" id="datasetTableContainer"></div>
+
+    <!-- Correlation Matrix -->
+    <h3>Feature Correlation Matrix</h3>
+    <div id="correlationMatrix"></div>
+
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+        const { ipcRenderer } = require('electron');
+        let datasets = [];
+        let currentDatasets = [];
+
+        ipcRenderer.on('load-datasets-for-feature-selection', (event, loadedDatasets) => {
+            datasets = loadedDatasets;
+            currentDatasets = datasets;
+            displayDataset();
+            populateDropdown();
+            generateCorrelationMatrix();
+        });
+
+        function populateDropdown() {
+            const dropdown = document.getElementById('datasetSelect');
+            dropdown.innerHTML = '<option value="all">All Datasets</option>';
+
+            datasets.forEach((dataset, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = dataset.name;
+                dropdown.appendChild(option);
+            });
+        }
+
+        // Function to display the dataset in a table
+        function displayDataset() {
+            const container = document.getElementById('datasetTableContainer');
+            container.innerHTML = '';
+
+            datasets.forEach((dataset, index) => {
+                const tableContainer = document.createElement('div');
+                tableContainer.style.overflowY = 'auto';
+
+                const title = document.createElement('h3');
+                title.textContent = `Dataset ${index + 1}: ${dataset.name}`;
+                container.appendChild(title);
+
+                let tableHTML = '<table>';
+                tableHTML += '<tr>';
+                for (const key in dataset.data[0]) {
+                    tableHTML += `<th>${key}</th>`;
+                }
+                tableHTML += '</tr>';
+
+                dataset.data.slice(0, 20).forEach(row => {
+                    tableHTML += '<tr>';
+                    for (const val of Object.values(row)) {
+                        tableHTML += `<td>${val}</td>`;
+                    }
+                    tableHTML += '</tr>';
+                });
+
+                tableHTML += '</table>';
+                tableContainer.innerHTML = tableHTML;
+                container.appendChild(tableContainer);
+            });
+        }
+
+        let targetVariable = null; // To store the detected target variable
+
+// Function to generate feature suggestions
+function suggestFeatures(correlationMatrix, columns) {
+    const suggestionsContainer = document.getElementById('featureSuggestions');
+    suggestionsContainer.innerHTML = ''; // Clear previous suggestions
+
+    // Detect target variable dynamically
+    targetVariable = columns.find(col => 
+        /production|system|generation|ac_power|dc_power/i.test(col)
+    );
+
+    if (!targetVariable) {
+        suggestionsContainer.innerHTML = '<p style="color: red;">No target variable detected. Please ensure the dataset has a column related to production.</p>';
+        return;
+    }
+
+    // Identify features with correlation > 0.5 with the target variable
+    const targetIndex = columns.indexOf(targetVariable);
+    const relevantFeatures = [];
+
+    correlationMatrix[targetIndex].forEach((correlation, index) => {
+        if (index !== targetIndex && Math.abs(correlation) > 0.5) {
+            relevantFeatures.push({ feature: columns[index], correlation: correlation.toFixed(2) });
+        }
+    });
+
+    // Add time-based suggestions (hour sin, hour cos)
+    const timeFeatures = ['hour_sin', 'hour_cos', 'day_of_year_sin', 'day_of_year_cos'];
+
+    // Display suggestions
+    let suggestionsHTML = `<p>Target Variable: <strong>${targetVariable}</strong></p>`;
+    if (relevantFeatures.length > 0) {
+        suggestionsHTML += `<p><strong>Suggested Features (Correlation > 0.5):</strong></p><ul>`;
+        relevantFeatures.forEach(f => {
+            suggestionsHTML += `<li>${f.feature} (Correlation: ${f.correlation})</li>`;
+        });
+        suggestionsHTML += `</ul>`;
+    } else {
+        suggestionsHTML += `<p>No features found with correlation > 0.5 with the target variable.</p>`;
+    }
+
+    suggestionsHTML += `<p><strong>Additional Suggested Time Features:</strong></p><ul>`;
+    timeFeatures.forEach(f => {
+        suggestionsHTML += `<li>${f}</li>`;
+    });
+    suggestionsHTML += `</ul>`;
+
+    suggestionsContainer.innerHTML = suggestionsHTML;
+}
+
+// Update the function that generates the correlation matrix to call feature suggestions
+function generateCorrelationMatrix() {
+    const container = document.getElementById('correlationMatrix');
+    container.innerHTML = '';
+
+    datasets.forEach((dataset) => {
+        const numericColumns = getNumericColumns(dataset.data);
+        const matrix = computeCorrelationMatrix(dataset.data, numericColumns);
+
+        // Prepare for Plotly heatmap
+        const trace = {
+            x: numericColumns,
+            y: numericColumns,
+            z: matrix,
+            type: 'heatmap',
+            colorscale: 'RdBu',
+            zmin: -1,
+            zmax: 1
+        };
+
+        const layout = {
+            title: 'Correlation Matrix',
+            xaxis: { title: 'Features' },
+            yaxis: { title: 'Features' },
+            margin: { l: 50, r: 50, t: 50, b: 50 }
+        };
+
+        const plotDiv = document.createElement('div');
+        container.appendChild(plotDiv);
+        Plotly.newPlot(plotDiv, [trace], layout);
+
+        // Generate feature suggestions based on the correlation matrix
+        suggestFeatures(matrix, numericColumns);
+
+        // Populate the dropdown with feature names
+        generateFeatureSelectionUI();
+    });
+}
+
+
+        // Function to compute correlation matrix
+        function computeCorrelationMatrix(data, columns) {
+            const matrix = [];
+            columns.forEach(col1 => {
+                const row = [];
+                columns.forEach(col2 => {
+                    row.push(calculateCorrelation(data, col1, col2));
+                });
+                matrix.push(row);
+            });
+            return matrix;
+        }
+
+        // Function to calculate Pearson correlation
+        function calculateCorrelation(data, colX, colY) {
+            const x = data.map(row => parseFloat(row[colX]));
+            const y = data.map(row => parseFloat(row[colY]));
+
+            const meanX = x.reduce((a, b) => a + b, 0) / x.length;
+            const meanY = y.reduce((a, b) => a + b, 0) / y.length;
+
+            const numerator = x.map((val, i) => (val - meanX) * (y[i] - meanY)).reduce((a, b) => a + b, 0);
+            const denominator = Math.sqrt(
+                x.map(val => Math.pow(val - meanX, 2)).reduce((a, b) => a + b, 0) *
+                y.map(val => Math.pow(val - meanY, 2)).reduce((a, b) => a + b, 0)
+            );
+
+            return denominator ? numerator / denominator : 0;
+        }
+
+        let selectedFeatures = []; // Store user-selected features
+
+// Function to populate the dropdown with column names
+function populateFeatureDropdown(columns) {
+    const dropdown = document.getElementById('featureDropdown');
+    dropdown.innerHTML = ''; // Clear previous options
+
+    columns.forEach(column => {
+        const option = document.createElement('option');
+        option.value = column;
+        option.textContent = column;
+        dropdown.appendChild(option);
+    });
+}
+
+// Function to confirm selected features
+function confirmFeatureSelection() {
+    const dropdown = document.getElementById('featureDropdown');
+    const selectedOptions = Array.from(dropdown.selectedOptions);
+
+    selectedFeatures = selectedOptions.map(opt => opt.value);
+
+    const newDataset = currentDatasets.map(dataset => {
+        const filteredData = dataset.data.map(row => {
+            const newRow = {};
+            selectedFeatures.forEach(feature => newRow[feature] = row[feature]);
+            return newRow;
+        });
+        return { name: dataset.name + '_selected_features', data: filteredData };
+    });
+
+    ipcRenderer.send('save-updated-dataset', newDataset);
+    alert('New dataset saved with selected features!');
+}
+
+
+// Call this function after loading the dataset
+function generateFeatureSelectionUI() {
+    datasets.forEach((dataset) => {
+        const allColumns = Object.keys(dataset.data[0]); // Get all column names
+        populateFeatureDropdown(allColumns); // Populate dropdown with all features
+    });
+}
+
+// Get numeric columns from the dataset
+function getNumericColumns(data) {
+    const sampleRow = data[0];
+    return Object.keys(sampleRow).filter(key => 
+        data.every(row => !isNaN(parseFloat(row[key])) && isFinite(row[key]))
+    );
+}
+ipcRenderer.on('datasets-updated', (event, updatedDatasets) => {
+    datasets = updatedDatasets; // Update the local datasets list
+    populateDropdown(); // Reload the dropdown list with the updated datasets
+});
+
+
+    </script>
+</body>
+</html>

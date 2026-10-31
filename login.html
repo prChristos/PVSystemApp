@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            height: 100vh;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(to bottom right, 
+                #007BFF, 
+                #339DFF, 
+                #66B6FF, 
+                #99CEFF, 
+                #CCE6FF  /* 5 shades of blue */
+            );
+            color: #444;
+        }
+
+        .login-container {
+            background: white;
+            padding: 2rem;
+            width: 350px;
+            text-align: center;
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.15);
+            border-radius: 12px;
+            border: 1px solid #ddd;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+            color: #007BFF;
+            font-weight: bold;
+        }
+
+        input {
+            display: block;
+            margin: 0.8rem 0;
+            padding: 0.8rem;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+
+        input:focus {
+            border-color: #007BFF;
+            outline: none;
+            box-shadow: 0 0 4px rgba(0, 123, 255, 0.5);
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 0.9rem;
+            cursor: pointer;
+            border-radius: 8px;
+            width: 100%;
+            font-size: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s, transform 0.2s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        #error {
+            color: red;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+            display: none;
+        }
+
+        .footer {
+            margin-top: 1.5rem;
+            font-size: 0.9rem;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h2>Welcome Back</h2>
+        <p style="margin-bottom: 1.5rem; color: #666;">Please enter your credentials to continue</p>
+        <input id="username" type="text" placeholder="Username" required />
+        <input id="password" type="password" placeholder="Password" required />
+        <button onclick="handleLogin()">Login</button>
+        <p id="error">Invalid credentials</p>
+        <div class="footer">© 2024 PV System Production App</div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+    
+        function handleLogin() {
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+    
+            if (username === "admin" && password === "password123") {
+                ipcRenderer.send('login-success'); // Notify main process
+            } else {
+                document.getElementById("error").style.display = "block";
+            }
+        }
+    </script>
+</body>
+</html>

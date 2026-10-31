@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dataset Analysis and Predictions</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(to bottom right, 
+                #007BFF, 
+                #339DFF, 
+                #66B6FF, 
+                #99CEFF, 
+                #CCE6FF
+            );
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            color: #333;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #007BFF;
+        }
+
+        .dataset-container {
+            width: 90%;
+            background-color: white;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        h3 {
+            color: #007BFF;
+            margin-bottom: 10px;
+        }
+
+        .table-container {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #FFD700;
+            color: #333;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <header>Dataset Analysis and Predictions</header>
+
+    <!-- Top Bar for Dataset Dropdown -->
+    <div class="top-bar">
+        <label for="datasetSelect" style="margin-right: 10px; color: white;">Select Dataset:</label>
+        <select id="datasetSelect" onchange="filterDatasets()">
+            <option value="all">All Datasets</option>
+        </select>
+    </div>
+
+    <!-- Container for displaying datasets -->
+    <div id="datasetsContainer"></div>
+
+    <!-- Action Buttons -->
+    <div style="text-align: center; margin-top: 20px;">
+        <button onclick="performStatisticalAnalysis()">Statistical Analysis</button>
+        <button onclick="performFeatureAnalysis()">Feature Analysis</button>
+        <button onclick="mergeDatasets()">Merge Datasets</button>
+        <button onclick="performTrainTestSplit()">Train-Test Split</button>
+        <button onclick="trainModel()">Model Training</button>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        let datasets = []; // Store all datasets
+        let currentDatasets = []; // Currently displayed datasets
+
+        ipcRenderer.on('datasets-updated', (event, updatedDatasets) => {
+            datasets = updatedDatasets; // Update the local datasets list
+            populateDropdown(); // Reload the dropdown list with the updated datasets
+            displayDatasets(datasets); // Display updated datasets
+        });      
+        
+
+        ipcRenderer.on('load-datasets', (event, updatedDatasets) => {
+            datasets = updatedDatasets;
+            populateDropdown();
+            displayDatasets(datasets);
+        });   
+        
+
+        // Populate dropdown list with dataset names
+        function populateDropdown() {
+            const dropdown = document.getElementById('datasetSelect');
+            dropdown.innerHTML = '<option value="all">All Datasets</option>'; // Default option
+
+            datasets.forEach((dataset, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = dataset.name;
+                dropdown.appendChild(option);
+            });
+        }
+
+        // Filter datasets based on dropdown selection
+        function filterDatasets() {
+            const selectedValue = document.getElementById('datasetSelect').value;
+
+            if (selectedValue === 'all') {
+                currentDatasets = datasets;
+            } else {
+                currentDatasets = [datasets[selectedValue]];
+            }
+
+            displayDatasets(currentDatasets);
+        }
+
+        // Display datasets in table format
+        function displayDatasets(selectedDatasets) {
+            const container = document.getElementById('datasetsContainer');
+            container.innerHTML = ''; // Clear previous content
+
+            selectedDatasets.forEach((dataset, index) => {
+                const datasetSection = document.createElement('div');
+                datasetSection.classList.add('dataset-container');
+
+                // Dataset Info
+                const datasetInfo = `
+                    <h3>Dataset ${index + 1}: ${dataset.name}</h3>
+                    <p><strong>Rows:</strong> ${dataset.data.length}</p>
+                    <p><strong>Columns:</strong> ${Object.keys(dataset.data[0]).length}</p>
+                `;
+
+                // Table Content
+                let tableHTML = '<div class="table-container"><table>';
+                tableHTML += '<tr>' + Object.keys(dataset.data[0]).map(col => `<th>${col}</th>`).join('') + '</tr>';
+
+                dataset.data.forEach(row => {
+                    tableHTML += '<tr>' + Object.values(row).map(val => `<td>${val}</td>`).join('') + '</tr>';
+                });
+
+                tableHTML += '</table></div>';
+
+                datasetSection.innerHTML = datasetInfo + tableHTML;
+                container.appendChild(datasetSection);
+            });
+        }
+
+        // Button functions
+        function performStatisticalAnalysis() { ipcRenderer.send('perform-statistical-analysis', currentDatasets); }
+        function performFeatureAnalysis() {
+            console.log('Sending datasets to main process:', currentDatasets); // Debugging
+            ipcRenderer.send('perform-feature-analysis', currentDatasets);
+        }
+        
+        function performTrainTestSplit() { ipcRenderer.send('perform-train-test-split', datasets); }
+        function trainModel() { ipcRenderer.send('train-model', datasets); }
+        function mergeDatasets() { ipcRenderer.send('open-merge-window', datasets); }
+        ipcRenderer.on('datasets-updated', (event, updatedDatasets) => {
+            datasets = updatedDatasets; // Update the local datasets list
+            populateDropdown(); // Reload the dropdown list with the updated datasets
+        });
+        
+    </script>
+</body>
+</html>

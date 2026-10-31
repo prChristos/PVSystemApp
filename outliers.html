@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outlier Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom right, #007BFF, #339DFF, #66B6FF, #99CEFF, #CCE6FF);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        /* Top bar dropdown styling */
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            color: #333;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #007BFF;
+        }
+
+        h3 {
+            color: #007BFF;
+            margin-bottom: 10px;
+        }
+
+        .chart-container {
+            width: 90%;
+            max-height: 500px;
+            overflow-y: auto;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background-color: white;
+            padding: 20px;
+        }
+
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>Outlier Detection</header>
+
+    <!-- Top Bar Dropdown -->
+    <div class="top-bar">
+        <label for="datasetSelect">Select Dataset:</label>
+        <select id="datasetSelect" onchange="switchDataset()">
+            <option value="all">All Datasets</option>
+        </select>
+    </div>
+
+    <!-- Chart Container -->
+    <div id="chartContainer" class="chart-container"></div>
+
+    <!-- Buttons -->
+    <button onclick="keepOutliers()">Keep Outliers</button>
+    <button onclick="removeOutliers()">Remove Outliers</button>
+
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+        const { ipcRenderer } = require('electron');
+        let datasets = [];
+        let currentDatasets = [];
+
+        // Load datasets and populate dropdown
+        ipcRenderer.on('load-datasets-for-outliers', (event, loadedDatasets) => {
+            datasets = loadedDatasets;
+            currentDatasets = datasets;
+            populateDropdown();
+            showOutliers();
+        });
+
+        function populateDropdown() {
+            const dropdown = document.getElementById('datasetSelect');
+            dropdown.innerHTML = '<option value="all">All Datasets</option>';
+
+            datasets.forEach((dataset, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = dataset.name;
+                dropdown.appendChild(option);
+            });
+        }
+
+        function switchDataset() {
+            const selectedValue = document.getElementById('datasetSelect').value;
+            currentDatasets = selectedValue === 'all' ? datasets : [datasets[selectedValue]];
+            showOutliers();
+        }
+
+        // Display boxplots for outlier detection
+        function showOutliers() {
+            const chartContainer = document.getElementById('chartContainer');
+            chartContainer.innerHTML = ''; // Clear previous plots
+
+            currentDatasets.forEach((dataset) => {
+                const numericColumns = getNumericColumns(dataset.data);
+                const datasetName = dataset.name;
+
+                chartContainer.innerHTML += `<h3>${datasetName} - Outlier Detection</h3>`;
+
+                numericColumns.forEach(column => {
+                    createBoxPlot(dataset.data, column, chartContainer);
+                });
+            });
+        }
+
+        function getNumericColumns(data) {
+            return Object.keys(data[0]).filter(key =>
+                data.every(row => !isNaN(parseFloat(row[key])) && isFinite(row[key]))
+            );
+        }
+
+        function createBoxPlot(data, column, container) {
+            const values = data.map(row => parseFloat(row[column]));
+
+            const trace = {
+                y: values,
+                type: 'box',
+                name: column,
+                boxpoints: 'outliers',
+                marker: { color: '#007BFF' }
+            };
+
+            const layout = {
+                title: `Outlier Detection for ${column}`,
+                yaxis: { title: column },
+                margin: { l: 50, r: 50, t: 50, b: 50 }
+            };
+
+            const plotDiv = document.createElement('div');
+            plotDiv.style.marginBottom = '30px';
+            container.appendChild(plotDiv);
+
+            Plotly.newPlot(plotDiv, [trace], layout);
+        }
+
+        // Keep Outliers
+        function keepOutliers() {
+            alert("Outliers are kept in the dataset.");
+        }
+
+        // Remove Outliers
+        function removeOutliers() {
+            currentDatasets.forEach(dataset => {
+                const numericColumns = getNumericColumns(dataset.data);
+        
+                numericColumns.forEach(column => {
+                    const values = dataset.data.map(row => parseFloat(row[column])).filter(v => !isNaN(v));
+                    const q1 = quantile(values, 0.25); // First Quartile (Q1)
+                    const q3 = quantile(values, 0.75); // Third Quartile (Q3)
+                    const iqr = q3 - q1; // Interquartile Range
+        
+                    const lowerBound = q1 - 1.5 * iqr;
+                    const upperBound = q3 + 1.5 * iqr;
+        
+                    const validValues = values.filter(v => v >= lowerBound && v <= upperBound);
+                    const minValue = Math.min(...validValues); // Minimum valid value
+                    const maxValue = Math.max(...validValues); // Maximum valid value
+        
+                    // Replace outliers with the min or max value
+                    dataset.data.forEach(row => {
+                        const value = parseFloat(row[column]);
+                        if (value < lowerBound) {
+                            row[column] = minValue; // Replace small outlier with minimum value
+                        } else if (value > upperBound) {
+                            row[column] = maxValue; // Replace large outlier with maximum value
+                        }
+                    });
+                });
+            });
+        
+            const newDataset = currentDatasets.map(ds => ({
+                name: ds.name + "_outliers_removed",
+                data: ds.data
+            }));
+        
+            datasets = [...datasets, ...newDataset];
+            ipcRenderer.send('save-modified-dataset', datasets);
+            populateDropdown();
+            alert("Outliers replaced with min/max values and saved as new datasets.");
+            showOutliers();
+        }
+        
+
+        function quantile(values, q) {
+            const sorted = values.sort((a, b) => a - b);
+            const pos = (sorted.length - 1) * q;
+            const base = Math.floor(pos);
+            const rest = pos - base;
+
+            if (sorted[base + 1] !== undefined) {
+                return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+            } else {
+                return sorted[base];
+            }
+        }
+
+        
+    </script>
+</body>
+</html>

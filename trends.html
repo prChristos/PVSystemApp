@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trend Analysis</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom right, #FFFAE6, #FFF0C2);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        header {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #444;
+        }
+
+        .chart-container {
+            width: 90%;
+            margin-top: 20px;
+        }
+
+        canvas {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+        }
+
+        h3 {
+            margin-top: 30px;
+            color: #007BFF;
+        }
+    </style>
+</head>
+<body>
+    <header>Trend Analysis</header>
+    <div id="chartContainer" class="chart-container"></div>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+        const { ipcRenderer } = require('electron');
+        let datasets = [];
+
+        ipcRenderer.on('load-datasets-for-trends', (event, loadedDatasets) => {
+            datasets = loadedDatasets;
+            analyzeTrends();
+        });
+
+        function analyzeTrends() {
+            if (datasets.length === 0) return;
+        
+            const chartContainer = document.getElementById('chartContainer');
+            chartContainer.innerHTML = ''; // Clear previous content
+        
+            datasets.forEach((dataset, index) => {
+                const datasetName = dataset.name;
+                const data = dataset.data;
+        
+                // Extract date-time and production data
+                const dateTime = data.map(row => row['DATE_TIME'] || row['Date-Hour(NMT)']);
+                const pvOutput = data.map(row => parseFloat(row['SystemProduction'] || row['SystemProduction']));
+        
+                // Prepare daily aggregation
+                const dailyData = aggregateDailyProduction(dateTime, pvOutput);
+                createDailyProductionChart(dailyData, `Daily PV Production (${datasetName})`, chartContainer);
+        
+                // Perform seasonal decomposition
+                performSeasonalDecomposition(dailyData, chartContainer);
+            });
+        }
+        
+        // Function to aggregate daily production
+        function aggregateDailyProduction(dateTime, production) {
+            const dailyProduction = {};
+            dateTime.forEach((date, index) => {
+                const day = date.split(' ')[0]; // Extract date part only
+                dailyProduction[day] = (dailyProduction[day] || 0) + production[index];
+            });
+        
+            const dates = Object.keys(dailyProduction).sort();
+            const productionValues = dates.map(date => dailyProduction[date]);
+        
+            return { dates, productionValues };
+        }
+        
+        // Create a daily production chart with average line
+        function createDailyProductionChart(dailyData, title, container) {
+            const trace = {
+                x: dailyData.dates,
+                y: dailyData.productionValues,
+                type: 'bar',
+                name: 'Daily Production',
+                marker: { color: '#007BFF' }
+            };
+        
+            const averageProduction = dailyData.productionValues.reduce((a, b) => a + b, 0) / dailyData.productionValues.length;
+        
+            const avgLine = {
+                x: dailyData.dates,
+                y: Array(dailyData.dates.length).fill(averageProduction),
+                mode: 'lines',
+                name: `Average: ${averageProduction.toFixed(2)} kW`,
+                line: { color: 'red', dash: 'dash' }
+            };
+        
+            const layout = {
+                title: title,
+                xaxis: { title: 'Date' },
+                yaxis: { title: 'System Production (kW)' },
+                margin: { l: 60, r: 40, t: 50, b: 50 }
+            };
+        
+            const plotDiv = document.createElement('div');
+            container.appendChild(plotDiv);
+        
+            Plotly.newPlot(plotDiv, [trace, avgLine], layout);
+        }
+        
+        // Perform seasonal decomposition and plot components
+        function performSeasonalDecomposition(dailyData, container) {
+            const { dates, productionValues } = dailyData;
+        
+            // Simple decomposition (observed, trend, seasonal, residuals)
+            const observed = productionValues;
+            const trend = movingAverage(productionValues, 7); // 7-day moving average
+            const seasonal = productionValues.map((val, idx) => val - trend[idx]);
+            const residual = productionValues.map((val, idx) => val - trend[idx] - seasonal[idx]);
+        
+            // Plot components
+            createDecompositionChart(dates, observed, 'Observed', '#007BFF', container);
+            createDecompositionChart(dates, trend, 'Trend', '#FF5733', container);
+            createDecompositionChart(dates, seasonal, 'Seasonal', '#28A745', container);
+            createDecompositionChart(dates, residual, 'Residual', '#FFC107', container);
+        }
+        
+        // Helper: Calculate moving average
+        function movingAverage(data, period) {
+            const result = [];
+            for (let i = 0; i < data.length; i++) {
+                const start = Math.max(0, i - Math.floor(period / 2));
+                const end = Math.min(data.length, i + Math.ceil(period / 2));
+                const average = data.slice(start, end).reduce((a, b) => a + b, 0) / (end - start);
+                result.push(average);
+            }
+            return result;
+        }
+        
+        // Create a chart for each decomposition component
+        function createDecompositionChart(dates, values, title, color, container) {
+            const trace = {
+                x: dates,
+                y: values,
+                mode: 'lines',
+                line: { color: color },
+                name: title
+            };
+        
+            const layout = {
+                title: `${title} Component`,
+                xaxis: { title: 'Date' },
+                yaxis: { title: 'System Production (kW)' },
+                margin: { l: 60, r: 40, t: 50, b: 50 }
+            };
+        
+            const plotDiv = document.createElement('div');
+            container.appendChild(plotDiv);
+        
+            Plotly.newPlot(plotDiv, [trace], layout);
+        }
+        
+        function createTimeSeriesChart(time, output, title, container) {
+            const trace = {
+                x: time,
+                y: output,
+                mode: 'lines',
+                line: { color: '#007BFF' },
+                name: 'PV Production'
+            };
+
+            const layout = {
+                title: title,
+                xaxis: { title: 'Time' },
+                yaxis: { title: 'PV Production (kW)' },
+                margin: { l: 60, r: 40, t: 50, b: 50 }
+            };
+
+            const plotDiv = document.createElement('div');
+            container.appendChild(plotDiv);
+
+            Plotly.newPlot(plotDiv, [trace], layout);
+        }
+
+        function createFeatureVsProductionChart(feature, output, title, container) {
+            const trace = {
+                x: feature,
+                y: output,
+                mode: 'markers',
+                marker: { color: '#FF5733', size: 8 },
+                name: 'Feature vs PV'
+            };
+
+            const layout = {
+                title: title,
+                xaxis: { title: 'Weather Feature (e.g., Irradiance)' },
+                yaxis: { title: 'PV Production (kW)' },
+                margin: { l: 60, r: 40, t: 50, b: 50 }
+            };
+
+            const plotDiv = document.createElement('div');
+            container.appendChild(plotDiv);
+
+            Plotly.newPlot(plotDiv, [trace], layout);
+        }
+
+        ipcRenderer.on('load-updated-dataset', (event, updatedDataset) => {
+            console.log('Received Updated Dataset:', updatedDataset);
+            // Use the updated dataset for analysis or display
+        });
+        
+    </script>
+</body>
+</html>

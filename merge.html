@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Merge Datasets</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom right, #007BFF, #339DFF, #66B6FF, #99CEFF, #CCE6FF);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            color: #333;
+            margin-left: 10px;
+        }
+
+        .table-container {
+            width: 90%;
+            background: white;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            max-height: 400px; /* Limit height for scrollable area */
+            overflow-y: auto; /* Add vertical scrollbar */
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #FFD700;
+            position: sticky;
+            top: 0;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <header>Merge Datasets</header>
+
+    <!-- Top Bar Dropdown -->
+    <div class="top-bar">
+        <label for="datasetSelect">Select Dataset:</label>
+        <select id="datasetSelect" onchange="switchDataset()">
+            <option value="all">All Datasets</option>
+        </select>
+    </div>
+
+    <div id="datasetsContainer"></div>
+
+    <button id="mergeCheckBtn" onclick="checkMergeConditions()">Merge Check</button>
+    <div id="mergeMessage" style="margin-top: 20px; font-size: 1.2rem; color: #333;"></div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        let datasets = []; // Global storage for datasets
+        let currentDatasets = []; // Currently displayed datasets
+
+        ipcRenderer.on('load-datasets-for-merge', (event, loadedDatasets) => {
+            datasets = loadedDatasets;
+            currentDatasets = datasets;
+            populateDropdown();
+            displayDatasets();
+        });
+
+        function populateDropdown() {
+            const dropdown = document.getElementById('datasetSelect');
+            dropdown.innerHTML = '<option value="all">All Datasets</option>'; // Default option
+
+            datasets.forEach((dataset, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = dataset.name;
+                dropdown.appendChild(option);
+            });
+        }
+
+        function switchDataset() {
+            const selectedValue = document.getElementById('datasetSelect').value;
+            currentDatasets = selectedValue === 'all' ? datasets : [datasets[selectedValue]];
+            displayDatasets();
+        }
+
+        function displayDatasets() {
+            const datasetsContainer = document.getElementById('datasetsContainer');
+            datasetsContainer.innerHTML = ''; // Clear previous content
+
+            currentDatasets.forEach((dataset, index) => {
+                const tableContainer = document.createElement('div');
+                tableContainer.classList.add('table-container');
+
+                const datasetTitle = document.createElement('h3');
+                datasetTitle.textContent = `Dataset ${index + 1}: ${dataset.name}`;
+                datasetsContainer.appendChild(datasetTitle);
+
+                let table = '<table>';
+                table += '<tr>';
+                for (const header in dataset.data[0]) {
+                    table += `<th>${header}</th>`;
+                }
+                table += '</tr>';
+
+                dataset.data.slice(0, 10).forEach(row => { // Limit rows to the first 10
+                    table += '<tr>';
+                    for (const field in row) {
+                        table += `<td>${row[field]}</td>`;
+                    }
+                    table += '</tr>';
+                });
+
+                table += '</table>';
+                tableContainer.innerHTML = table;
+                datasetsContainer.appendChild(tableContainer);
+            });
+        }
+
+        function checkMergeConditions() {
+            const mergeMessage = document.getElementById('mergeMessage');
+            mergeMessage.innerHTML = '';
+
+            if (datasets.length < 2) {
+                mergeMessage.style.color = 'red';
+                mergeMessage.textContent = 'You need at least two datasets to check for merging.';
+                return;
+            }
+
+            const columnSets = datasets.map(dataset => ({
+                name: dataset.name,
+                columns: dataset.data.length > 0 ? Object.keys(dataset.data[0]) : [],
+            }));
+
+            const emptyDatasets = columnSets.filter(dataset => dataset.columns.length === 0);
+            if (emptyDatasets.length > 0) {
+                mergeMessage.style.color = 'red';
+                mergeMessage.innerHTML = `
+                    The following datasets are empty and cannot be used for merging:
+                    <ul>${emptyDatasets.map(ds => `<li>${ds.name}</li>`).join('')}</ul>
+                `;
+                return;
+            }
+
+            const dateTimeColumns = columnSets.map(dataset => 
+                dataset.columns.filter(col => /date|time|hour/i.test(col))
+            );
+
+            const canMergeOnDateTime = dateTimeColumns.every(cols => cols.length > 0);
+
+            const commonColumns = columnSets.reduce((acc, curr) => {
+                if (!acc) return new Set(curr.columns);
+                return new Set([...acc].filter(col => curr.columns.includes(col)));
+            }, null);
+
+            if (canMergeOnDateTime && commonColumns.size > 0) {
+                mergeMessage.style.color = 'green';
+                mergeMessage.innerHTML = `
+                    <strong>Datasets can be merged based on Date-Time and the following common columns:</strong>
+                    <ul>${[...commonColumns].map(col => `<li>${col}</li>`).join('')}</ul>
+                `;
+            } else if (canMergeOnDateTime) {
+                mergeMessage.style.color = 'green';
+                mergeMessage.textContent = 'Datasets can be merged based on Date-Time columns.';
+            } else if (commonColumns.size > 0) {
+                mergeMessage.style.color = 'orange';
+                mergeMessage.innerHTML = `
+                    <strong>Datasets have common columns but no Date-Time columns:</strong>
+                    <ul>${[...commonColumns].map(col => `<li>${col}</li>`).join('')}</ul>
+                `;
+            } else {
+                mergeMessage.style.color = 'red';
+                mergeMessage.textContent = 'Datasets cannot be merged. No Date-Time or common columns found.';
+            }
+        }
+    </script>
+</body>
+</html>
